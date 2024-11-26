@@ -1,7 +1,7 @@
 import axios from "axios";
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import socket from "../helpers/socket";
+import socket, { baseUrl } from "../helpers/socket";
 
 const Login = () => {
   const [username, setUsername] = useState("");
@@ -9,7 +9,7 @@ const Login = () => {
   const navigate = useNavigate();
 
   const handleLogin = async() => {
-    const res = await axios.post("http://localhost:4004/api/v1/login",{email:username,password})
+    const res = await axios.post(`${baseUrl}/api/v1/login`,{email:username,password})
     socket.emit("login",res.data.user._id)
     localStorage.setItem("token",res.data.token)
     localStorage.setItem("userID",res.data.user._id)

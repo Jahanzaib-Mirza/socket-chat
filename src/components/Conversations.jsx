@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
-import socket from "../helpers/socket";
+import socket, { baseUrl } from "../helpers/socket";
 
 const Conversations = () => {
   const [conversations, setConversations] = useState([]);
@@ -11,15 +11,18 @@ const Conversations = () => {
   const [newMessage, setNewMessage] = useState("");
   const navigate = useNavigate();
 
-  const userId = localStorage.getItem("userID"); 
+  const userId = localStorage.getItem("userID");
 
   const fetchConversations = async () => {
     try {
       setLoading(true);
       const token = localStorage.getItem("token");
-      const response = await axios.get("http://localhost:4004/api/v1/conversations", {
-        headers: { Authorization: token },
-      });
+      const response = await axios.get(
+        `${baseUrl}/api/v1/conversations`,
+        {
+          headers: { Authorization: token },
+        }
+      );
       console.log(response);
       setConversations(response.data.conversations);
     } catch (error) {
@@ -29,20 +32,26 @@ const Conversations = () => {
     }
   };
   useEffect(() => {
-      fetchConversations();
-    }, [userId]);
-    
-    const handleSelectConversation = (conversation) => {
-    const receiver = conversation.participants.find((participant) => participant._id !== userId);
+    fetchConversations();
+  }, [userId]);
+
+  const handleSelectConversation = (conversation) => {
+    const receiver = conversation.participants.find(
+      (participant) => participant._id !== userId
+    );
     console.log(receiver);
-    navigate(`/chat/${conversation._id}`,{state:{receiver}});
+    navigate(`/chat/${conversation._id}`, { state: { receiver } });
   };
 
   const handleCreateNewConversation = async () => {
     try {
-        const messageData={senderId:userId,receiverId:newRecipient,message:newMessage}
-        socket.emit("sendMessage",messageData);
-        fetchConversations();
+      const messageData = {
+        senderId: userId,
+        receiverId: newRecipient,
+        message: newMessage,
+      };
+      socket.emit("sendMessage", messageData);
+      fetchConversations();
     } catch (error) {
       console.error("Error creating new conversation:", error);
     }
@@ -134,9 +143,16 @@ const Conversations = () => {
                   margin: "10px 0",
                 }}
               >
-                <h3>{conversation.participants.find((participant) => participant._id !== userId).name}</h3>
+                <h3>
+                  {conversation.participants.length > 1
+                    ? conversation.participants.find(
+                        (participant) => participant._id !== userId
+                      )?.name
+                    : "No other participants"}
+                </h3>{" "}
                 <p>
-                  Last Message: {conversation.lastMessage?.message || "No messages yet"}
+                  Last Message:{" "}
+                  {conversation.lastMessage?.message || "No messages yet"}
                 </p>
               </li>
             ))}
