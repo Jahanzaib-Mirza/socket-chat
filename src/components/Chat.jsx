@@ -2,34 +2,38 @@ import React, { useState, useEffect, useRef } from "react";
 import { useLocation, useParams } from "react-router-dom";
 import socket, { baseUrl } from "../helpers/socket";
 
+const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
+
 const Chat = () => {
   const { conversationId } = useParams();
   const [messages, setMessages] = useState([]);
   const [message, setMessage] = useState("");
   const [attachments, setAttachments] = useState([]);
+  const [fileError, setFileError] = useState(""); // For file size validation
+  const [isSendDisabled, setIsSendDisabled] = useState(true); // To control the Send button state
   const [typingUser, setTypingUser] = useState(null);
 
   const userId = localStorage.getItem("userID");
   const location = useLocation();
   const { receiver } = location.state;
 
-  // Reference to the chat box container
   const chatBoxRef = useRef(null);
+
+  // Listen for typing indicator
   useEffect(() => {
-    // Listen for typing event
     socket.on("userTyping", ({ senderId }) => {
       setTypingUser(senderId);
-
-      // Clear typing indicator after a delay
       setTimeout(() => {
         setTypingUser(null);
       }, 2000); // Clear after 2 seconds
     });
 
     return () => {
-      socket.off("userTyping"); // Clean up when component unmounts
+      socket.off("userTyping");
     };
   }, []);
+
+  // Fetch messages when conversationId changes
   useEffect(() => {
     if (conversationId) {
       socket.emit("joinConversation", conversationId);
@@ -47,18 +51,19 @@ const Chat = () => {
     };
   }, [conversationId]);
 
-  // Emit typing event when user starts typing
-  const handleTyping = () => {
-    socket.emit("typing", { conversationId, senderId:userId });
-  };
-
-  // Scroll to the bottom whenever messages change
+  // Scroll to the bottom on new message
   useEffect(() => {
     if (chatBoxRef.current) {
       chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
     }
-  }, [messages]); // This effect will run every time messages change
+  }, [messages]);
 
+  // Emit typing event
+  const handleTyping = () => {
+    socket.emit("typing", { conversationId, senderId: userId });
+  };
+
+  // Send message with attachments
   const handleSend = async () => {
     const files = await Promise.all(
       attachments.map(async (file) => {
@@ -81,44 +86,58 @@ const Chat = () => {
         files,
       },
       (response) => {
-        console.log("Response from server:", response); 
-        setMessage(""); // Clear message state
-      setAttachments([])
-        // Log the response to debug
+        console.log("Response from server:", response);
+        setMessage("");
+        setAttachments([]);
+        setIsSendDisabled(true); // Disable send button after sending
       }
     );
   };
 
+  // Convert file to base64
   const convertToBase64 = (file) => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.readAsDataURL(file);
-      reader.onload = () => resolve(reader.result.split(",")[1]); // Strip the prefix (e.g., `data:image/jpeg;base64,`)
+      reader.onload = () => resolve(reader.result.split(",")[1]);
       reader.onerror = (error) => reject(error);
     });
   };
 
+  // Handle file selection
   const handleFileChange = (e) => {
-    setAttachments(Array.from(e.target.files));
+    const files = Array.from(e.target.files);
+    const invalidFile = files.find((file) => file.size > MAX_FILE_SIZE);
+
+    if (invalidFile) {
+      setFileError(`File "${invalidFile.name}" exceeds the 20MB limit.`);
+      setAttachments([]);
+      setIsSendDisabled(true);
+    } else {
+      setFileError("");
+      setAttachments(files);
+      setIsSendDisabled(false); // Enable send button when valid file is selected
+    }
   };
 
+  // Render attachments
   const renderAttachments = (attachments) => {
     return attachments.map((attachment, index) => {
-      if (attachment.type === "image") {
+      if (attachment.type.startsWith("image")) {
         return (
           <img
             key={index}
             src={`${baseUrl}${attachment.url}`}
             alt={attachment.name}
-            style={{ maxWidth: "200px", margin: "5px" }}
+            style={styles.attachmentImage}
           />
         );
-      } else if (attachment.type === "video") {
+      } else if (attachment.type.startsWith("video")) {
         return (
           <video
             key={index}
             controls
-            style={{ maxWidth: "200px", margin: "5px" }}
+            style={styles.attachmentVideo}
           >
             <source src={`${baseUrl}${attachment.url}`} type="video/mp4" />
           </video>
@@ -127,10 +146,10 @@ const Chat = () => {
         return (
           <a
             key={index}
-            href={attachment.url}
+            href={URL.createObjectURL(attachment)}
             target="_blank"
             rel="noopener noreferrer"
-            style={{ margin: "5px" }}
+            style={styles.attachmentLink}
           >
             {attachment.name}
           </a>
@@ -139,8 +158,9 @@ const Chat = () => {
     });
   };
 
+  // Handle "Enter" key press for sending message
   const handleKeyDown = (e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey && !isSendDisabled) {
       e.preventDefault();
       handleSend();
     }
@@ -148,11 +168,8 @@ const Chat = () => {
 
   return (
     <div style={styles.container}>
-      <h2>Chat with {receiver.name}</h2>
-      <div
-        ref={chatBoxRef} // Assign the ref to the chat box container
-        style={styles.chatBox}
-      >
+      <h2 style={styles.header}>Chat with {receiver.name}</h2>
+      <div ref={chatBoxRef} style={styles.chatBox}>
         {messages.map((msg, index) => {
           const isLoggedUser = msg.senderId === userId;
           return (
@@ -161,16 +178,13 @@ const Chat = () => {
               style={{
                 ...styles.message,
                 alignSelf: isLoggedUser ? "flex-end" : "flex-start",
-                backgroundColor: isLoggedUser ? "#d1f7c4" : "#f1f1f1",
+                backgroundColor: isLoggedUser ? "#007AFF" : "#2C2C2E",
+                color: "#fff",
                 textAlign: isLoggedUser ? "right" : "left",
-                borderRadius: "10px",
-                padding: "10px",
-                maxWidth: "100%",
-                margin: "5px",
               }}
             >
               <strong>{isLoggedUser ? "You" : receiver.name}: </strong>
-              <p>{msg.message}</p>
+              <p style={styles.messageText}>{msg.message}</p>
               {msg.attachments && renderAttachments(msg.attachments)}
             </div>
           );
@@ -184,8 +198,9 @@ const Chat = () => {
           onChange={(e) => {
             setMessage(e.target.value);
             handleTyping();
+            setIsSendDisabled(!e.target.value.trim() && attachments.length === 0);
           }}
-          onKeyDown={handleKeyDown} // Listen for "Enter" key press
+          onKeyDown={handleKeyDown}
           style={styles.input}
         />
         <input
@@ -194,28 +209,100 @@ const Chat = () => {
           onChange={handleFileChange}
           style={styles.fileInput}
         />
-        <button onClick={handleSend} style={styles.button}>
+        <button
+          onClick={handleSend}
+          disabled={isSendDisabled}
+          style={{
+            ...styles.button,
+            backgroundColor: isSendDisabled ? "#6C757D" : "#007AFF",
+            cursor: isSendDisabled ? "not-allowed" : "pointer",
+          }}
+        >
           Send
         </button>
-        {typingUser && <div>{typingUser} is typing...</div>}
       </div>
+      {fileError && <p style={styles.fileError}>{fileError}</p>}
+      {typingUser && <p style={styles.typing}>{typingUser} is typing...</p>}
     </div>
   );
 };
 
+// Modernized Styles
 const styles = {
-  container: { padding: "20px" },
-  chatBox: {
-    border: "1px solid #ccc",
-    padding: "10px",
-    height: "300px",
-    overflowY: "scroll",
+  container: {
+    display: "flex",
+    flexDirection: "column",
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#121212",
+    width: "100vw", // Full width
+    height: "100vh", // Full height
+    color: "#fff",
   },
-  message: { margin: "10px 0" },
-  inputContainer: { display: "flex", marginTop: "10px", gap: "10px" },
-  input: { flex: 1, padding: "10px", fontSize: "16px" },
-  fileInput: { padding: "5px", fontSize: "14px" },
-  button: { padding: "10px 20px", fontSize: "16px", cursor: "pointer" },
+  header: {
+    fontSize: "1.8rem",
+    marginBottom: "20px",
+    color: "#5AC8FA",
+  },
+  chatBox: {
+    border: "1px solid #2C2C2E",
+    backgroundColor: "#1C1C1E",
+    padding: "15px",
+    width: "90vw", // 90% of the viewport width
+    height: "70vh", // 70% of the viewport height
+    overflowY: "scroll",
+    borderRadius: "10px",
+    display: "flex",
+    flexDirection: "column",
+  },
+  message: {
+    margin: "10px 0",
+    padding: "10px",
+    borderRadius: "10px",
+    maxWidth: "80%",
+  },
+  senderName: {
+    fontWeight: "bold",
+    marginBottom: "5px",
+    fontSize: "0.9rem",
+  },
+  messageText: {
+    fontSize: "1rem",
+    margin: 0,
+  },
+  inputContainer: {
+    display: "flex",
+    gap: "10px",
+    width: "90vw", // Match chat box width
+    marginTop: "20px",
+  },
+  input: {
+    flex: 1,
+    padding: "10px",
+    fontSize: "1rem",
+    borderRadius: "10px",
+    border: "1px solid #2C2C2E",
+    backgroundColor: "#1C1C1E",
+    color: "#fff",
+  },
+  fileInput: {
+    padding: "5px",
+    fontSize: "0.9rem",
+    color: "#5AC8FA",
+  },
+  button: {
+    padding: "10px 20px",
+    fontSize: "1rem",
+    border: "none",
+    borderRadius: "10px",
+    color: "#fff",
+    backgroundColor: "#007AFF",
+    cursor: "pointer",
+  },
+  typingIndicator: {
+    marginTop: "10px",
+    fontStyle: "italic",
+    color: "#5AC8FA",
+  },
 };
-
 export default Chat;
